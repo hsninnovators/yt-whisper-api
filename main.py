@@ -1,23 +1,20 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
-import requests
-import os
 
 app = FastAPI()
 
+# Root path to verify service is live
+@app.get("/")
+def read_root():
+    return {"message": "YouTube Whisper API is running!"}
+
+# Model to receive YouTube URL
 class VideoURL(BaseModel):
     url: str
 
-@app.post("/transcribe/")
-async def transcribe_video(video: VideoURL):
-    try:
-        response = requests.post(
-            "https://hsn-whisper.hf.space/run/predict",
-            json={"data": [video.url]},
-            headers={"Content-Type": "application/json"}
-        )
-        response.raise_for_status()
-        result = response.json()
-        return {"transcription": result["data"][0]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Placeholder endpoint for transcription
+@app.post("/transcribe")
+async def transcribe(video: VideoURL):
+    # Replace this section with actual transcription logic
+    return {"status": "received", "video_url": video.url}
+
