@@ -1,61 +1,55 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from faster_whisper import WhisperModel
 import subprocess
-import os
 import uuid
-import whisper
+import os
 
 app = FastAPI()
 
-# CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Load lightweight Whisper model
+model = WhisperModel("base", device="cpu", compute_type="int8")
 
-# Whisper model load (use small, medium or large if needed)
-model = whisper.load_model("base")
-
-# Base route to test API is running
-@app.get("/")
-async def root():
-    return {"message": "YouTube Whisper API is running!"}
-
-# Request body schema
-class TranscriptRequest(BaseModel):
+# Input model
+class VideoURL(BaseModel):
     url: str
 
-# Transcription endpoint
-@app.post("/transcribe")
-async def transcribe(req: TranscriptRequest):
+def download_audio(url: str, output_path: str) -> str:
+    audio_file = os.path.join(output_path, f"{uuid.uuid4()}.mp3")
+    command = [
+        "yt-dlp",
+        "-f", "bestaudio",
+        "--extract-audio",
+        "--audio-format", "mp3",
+        "--audio-quality", "0",
+        "-o", audio_file,
+        url
+    ]
     try:
-        video_url = req.url
-        audio_filename = f"audio_{uuid.uuid4()}.mp3"
-
-        # Use yt-dlp to download audio
-        command = [
-            "yt-dlp",
-            "-x", "--audio-format", "mp3",
-            "--output", audio_filename,
-            video_url
-        ]
         subprocess.run(command, check=True)
-
-        # Transcribe using whisper
-        result = model.transcribe(audio_filename)
-
-        # Clean up the file
-        os.remove(audio_filename)
-
-        return {"text": result["text"]}
-
+        return audio_file
     except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail="Failed to download audio.")
+        raise Exception(f"yt-dlp failed: {str(e)}")
+
+@app.post("/transcribe")
+async def transcribe(video: VideoURL):
+    output_dir = "/tmp"
+    try:
+        audio_path = download_audio(video.url, output_dir)
+        segments, _ = model.transcribe(audio_path)
+
+        transcript = ""
+        for segment in segments:
+            start = round(segment.start, 2)
+            end = round(segment.end, 2)
+            text = segment.text.strip()
+            transcript += f"[{start} - {end}] {text}\n"
+
+        os.remove(audio_path)  # cleanup
+        return {"transcript": transcript.strip()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+@app.get("/")
+async def root():
+    return {"message": "Whisper transcription API is live."}
